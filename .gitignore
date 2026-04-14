@@ -1,0 +1,5 @@
+local_secrets.json
+__pycache__/
+audio/
+image/
+REPO_CONTEXT_AND_FEATURE_PLAN.md
