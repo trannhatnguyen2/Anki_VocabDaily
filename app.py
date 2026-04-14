@@ -362,7 +362,8 @@ if search_images:
         _ = lesson
         results = search_pexels_images(
             word=word,
-            api_key=st.session_state.pexels_api_key,
+            api_key=st.secrets.get("PEXELS_API_KEY"),
+            # api_key=st.session_state.pexels_api_key,
             limit=st.session_state.image_search_limit,
         )
         st.session_state.image_results = results
