@@ -1,5 +1,6 @@
 from io import BytesIO
 from pathlib import Path
+import base64
 import json
 import re
 
@@ -7,6 +8,7 @@ from PIL import Image
 import requests
 from gtts import gTTS
 import streamlit as st
+import streamlit.components.v1 as components
 
 
 PEXELS_SEARCH_URL = "https://api.pexels.com/v1/search"
@@ -46,6 +48,7 @@ def build_base_filename(tag: str, lesson: int, word: str) -> str:
 
     if not safe_tag:
         raise ValueError("Tag must be a non-empty string.")
+
     if not safe_word:
         raise ValueError("Word must be a non-empty string.")
 
@@ -82,6 +85,24 @@ def build_tts_bytes(text: str, lang: str = "en") -> bytes:
     tts.write_to_fp(audio_buffer)
     audio_buffer.seek(0)
     return audio_buffer.getvalue()
+
+
+def auto_download_bytes(file_bytes: bytes, file_name: str, mime: str) -> None:
+    b64 = base64.b64encode(file_bytes).decode()
+    html = f"""
+    <html>
+      <body>
+        <a id="download_link" href="data:{mime};base64,{b64}" download="{file_name}"></a>
+        <script>
+          const link = document.getElementById("download_link");
+          if (link) {{
+            link.click();
+          }}
+        </script>
+      </body>
+    </html>
+    """
+    components.html(html, height=0)
 
 
 def search_pexels_images(word: str, api_key: str, limit: int = DEFAULT_IMAGE_LIMIT) -> list[dict]:
@@ -125,7 +146,6 @@ def search_pexels_images(word: str, api_key: str, limit: int = DEFAULT_IMAGE_LIM
                 "thumbnail": thumbnail,
             }
         )
-
         if len(images) >= search_limit:
             break
 
@@ -192,8 +212,8 @@ for key, value in session_defaults.items():
 
 st.title("🔊 Word Audio + Image Downloader")
 st.caption(
-    "This deployed version sends files to your browser. "
-    "Downloads will go to your browser's normal download folder on Windows."
+    "Click once to generate and auto-download. "
+    "On Streamlit Cloud, files download through your browser to its configured download folder."
 )
 
 with st.container():
@@ -224,15 +244,18 @@ with st.container():
             key="image_search_limit",
         )
         st.info(
-            "For Streamlit Cloud, files cannot be saved directly to D:\\ on your PC. "
-            "Use the download buttons below.",
+            "Browser controls the download folder in deployed mode. "
+            "Set your browser download location to D:\\Anki\\audio if you want files to land there.",
             icon="ℹ️",
         )
 
 st.text_area(
     "Sentence",
     key="sentence",
-    placeholder="Enter a sentence",
+    placeholder=(
+        "Enter a sentence, example: The sales associate gave his assurance "
+        "that the missing keyboard would be replaced the next day"
+    ),
     height=150,
 )
 
@@ -242,33 +265,47 @@ with audio_col1:
     if st.button("Generate Word Pronunciation", use_container_width=True):
         try:
             tag = st.session_state.tag.strip()
-            lesson, word = ensure_required_fields(tag, st.session_state.lesson, st.session_state.word)
+            lesson, word = ensure_required_fields(
+                tag,
+                st.session_state.lesson,
+                st.session_state.word,
+            )
 
             file_name = f"{build_base_filename(tag, lesson, word)}.mp3"
             audio_bytes = build_tts_bytes(word, lang="en")
 
             st.session_state.word_audio_bytes = audio_bytes
             st.session_state.word_audio_name = file_name
-            st.success(f"Generated: {file_name}")
+
+            st.success(f"Generated and downloading: {file_name}")
+            st.audio(audio_bytes, format="audio/mp3")
+            auto_download_bytes(
+                file_bytes=audio_bytes,
+                file_name=file_name,
+                mime="audio/mpeg",
+            )
         except Exception as exc:
             st.error(str(exc))
 
     if st.session_state.word_audio_bytes:
-        st.audio(st.session_state.word_audio_bytes, format="audio/mp3")
         st.download_button(
-            label="Download word mp3",
+            label="Download word mp3 again",
             data=st.session_state.word_audio_bytes,
             file_name=st.session_state.word_audio_name,
             mime="audio/mpeg",
             use_container_width=True,
-            key="download_word_audio",
+            key="download_word_audio_again",
         )
 
 with audio_col2:
     if st.button("Generate Sentence Audio", use_container_width=True):
         try:
             tag = st.session_state.tag.strip()
-            lesson, word = ensure_required_fields(tag, st.session_state.lesson, st.session_state.word)
+            lesson, word = ensure_required_fields(
+                tag,
+                st.session_state.lesson,
+                st.session_state.word,
+            )
             sentence = st.session_state.sentence.strip()
             if not sentence:
                 raise ValueError("Please enter a sentence.")
@@ -278,19 +315,25 @@ with audio_col2:
 
             st.session_state.sentence_audio_bytes = audio_bytes
             st.session_state.sentence_audio_name = file_name
-            st.success(f"Generated: {file_name}")
+
+            st.success(f"Generated and downloading: {file_name}")
+            st.audio(audio_bytes, format="audio/mp3")
+            auto_download_bytes(
+                file_bytes=audio_bytes,
+                file_name=file_name,
+                mime="audio/mpeg",
+            )
         except Exception as exc:
             st.error(str(exc))
 
     if st.session_state.sentence_audio_bytes:
-        st.audio(st.session_state.sentence_audio_bytes, format="audio/mp3")
         st.download_button(
-            label="Download sentence mp3",
+            label="Download sentence mp3 again",
             data=st.session_state.sentence_audio_bytes,
             file_name=st.session_state.sentence_audio_name,
             mime="audio/mpeg",
             use_container_width=True,
-            key="download_sentence_audio",
+            key="download_sentence_audio_again",
         )
 
 with action_col:
@@ -307,8 +350,7 @@ with search_col:
 
 with info_col:
     st.info(
-        "Image file name: {tag}_{lesson}_{word}.jpg | "
-        "Photos provided by Pexels.",
+        "Image file name: {tag}_{lesson}_{word}.jpg | Photos provided by Pexels.",
         icon="🖼️",
     )
 
@@ -324,7 +366,6 @@ if search_images:
             api_key=api_key,
             limit=st.session_state.image_search_limit,
         )
-
         st.session_state.image_results = results
         st.session_state.last_image_query = word
         st.success(f"Found {len(results)} image results for '{word}'.")
@@ -339,27 +380,44 @@ if st.session_state.image_results:
     for index, image_item in enumerate(st.session_state.image_results):
         with gallery_columns[index % 3]:
             st.image(image_item["thumbnail"], use_container_width=True)
+
             if image_item["title"]:
                 st.caption(image_item["title"])
             if image_item["source"]:
                 st.caption(f"Source: {image_item['source']}")
 
-            try:
-                tag = st.session_state.tag.strip()
-                lesson, word = ensure_required_fields(tag, st.session_state.lesson, st.session_state.word)
-                base_name = build_base_filename(tag, lesson, word)
-                image_bytes = build_jpg_bytes_from_url(image_item["original"])
+            if st.button(
+                f"Download image {index + 1}",
+                key=f"download_image_btn_{index}",
+                use_container_width=True,
+            ):
+                try:
+                    tag = st.session_state.tag.strip()
+                    lesson, word = ensure_required_fields(
+                        tag,
+                        st.session_state.lesson,
+                        st.session_state.word,
+                    )
+                    file_name = f"{build_base_filename(tag, lesson, word)}.jpg"
+                    image_bytes = build_jpg_bytes_from_url(image_item["original"])
 
-                st.download_button(
-                    label=f"Download image {index + 1}",
-                    data=image_bytes,
-                    file_name=f"{base_name}.jpg",
-                    mime="image/jpeg",
-                    use_container_width=True,
-                    key=f"download_image_{index}",
-                )
-            except Exception as exc:
-                st.error(str(exc))
+                    st.success(f"Prepared and downloading: {file_name}")
+                    auto_download_bytes(
+                        file_bytes=image_bytes,
+                        file_name=file_name,
+                        mime="image/jpeg",
+                    )
+
+                    st.download_button(
+                        label="Download image again",
+                        data=image_bytes,
+                        file_name=file_name,
+                        mime="image/jpeg",
+                        use_container_width=True,
+                        key=f"download_image_again_{index}",
+                    )
+                except Exception as exc:
+                    st.error(str(exc))
 
 st.caption(
     "Word file: {tag}_{lesson}_{word}.mp3 | "
