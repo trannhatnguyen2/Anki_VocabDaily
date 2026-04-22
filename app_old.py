@@ -48,6 +48,7 @@ def build_base_filename(tag: str, lesson: int, word: str) -> str:
 
     if not safe_tag:
         raise ValueError("Tag must be a non-empty string.")
+
     if not safe_word:
         raise ValueError("Word must be a non-empty string.")
 
@@ -86,15 +87,14 @@ def build_tts_bytes(text: str, lang: str = "en") -> bytes:
     return audio_buffer.getvalue()
 
 
-def auto_download_bytes(file_bytes: bytes, file_name: str, mime: str, token: int) -> None:
+def auto_download_bytes(file_bytes: bytes, file_name: str, mime: str) -> None:
     b64 = base64.b64encode(file_bytes).decode()
-    element_id = f"download_link_{token}"
     html = f"""
     <html>
       <body>
-        <a id="{element_id}" href="data:{mime};base64,{b64}" download="{file_name}"></a>
+        <a id="download_link" href="data:{mime};base64,{b64}" download="{file_name}"></a>
         <script>
-          const link = document.getElementById("{element_id}");
+          const link = document.getElementById("download_link");
           if (link) {{
             link.click();
           }}
@@ -173,19 +173,6 @@ def build_jpg_bytes_from_url(image_url: str) -> bytes:
     return output_buffer.getvalue()
 
 
-def queue_download(file_bytes: bytes, file_name: str, mime: str) -> None:
-    st.session_state.pending_download_bytes = file_bytes
-    st.session_state.pending_download_name = file_name
-    st.session_state.pending_download_mime = mime
-    st.session_state.download_token += 1
-
-
-def clear_pending_download() -> None:
-    st.session_state.pending_download_bytes = None
-    st.session_state.pending_download_name = ""
-    st.session_state.pending_download_mime = ""
-
-
 def reset_fields():
     st.session_state.tag = ""
     st.session_state.lesson = ""
@@ -199,8 +186,6 @@ def reset_fields():
     st.session_state.word_audio_name = ""
     st.session_state.sentence_audio_bytes = None
     st.session_state.sentence_audio_name = ""
-    clear_pending_download()
-    st.session_state.download_token = 0
 
 
 st.set_page_config(page_title="Audio + Image Downloader", page_icon="🔊", layout="wide")
@@ -218,10 +203,6 @@ session_defaults = {
     "word_audio_name": "",
     "sentence_audio_bytes": None,
     "sentence_audio_name": "",
-    "pending_download_bytes": None,
-    "pending_download_name": "",
-    "pending_download_mime": "",
-    "download_token": 0,
 }
 
 for key, value in session_defaults.items():
@@ -232,22 +213,8 @@ for key, value in session_defaults.items():
 st.title("🔊 Word Audio + Image Downloader")
 st.caption(
     "Click once to generate and auto-download. "
-    "In deployed mode, the browser controls the final download folder."
+    "On Streamlit Cloud, files download through your browser to its configured download folder."
 )
-
-download_placeholder = st.empty()
-
-# Centralized auto-download handler: only one place in the whole app may trigger downloads.
-if st.session_state.pending_download_bytes is not None:
-    with download_placeholder:
-        auto_download_bytes(
-            file_bytes=st.session_state.pending_download_bytes,
-            file_name=st.session_state.pending_download_name,
-            mime=st.session_state.pending_download_mime,
-            token=st.session_state.download_token,
-        )
-    clear_pending_download()
-
 
 with st.container():
     form_col1, form_col2 = st.columns(2)
@@ -277,7 +244,8 @@ with st.container():
             key="image_search_limit",
         )
         st.info(
-            "If you want files to land in D:\\Anki\\audio, set that as your browser's default download folder.",
+            "Browser controls the download folder in deployed mode. "
+            "Set your browser download location to D:\\Anki\\audio if you want files to land there.",
             icon="ℹ️",
         )
 
@@ -309,19 +277,17 @@ with audio_col1:
             st.session_state.word_audio_bytes = audio_bytes
             st.session_state.word_audio_name = file_name
 
-            queue_download(
+            st.success(f"Generated and downloading: {file_name}")
+            st.audio(audio_bytes, format="audio/mp3")
+            auto_download_bytes(
                 file_bytes=audio_bytes,
                 file_name=file_name,
                 mime="audio/mpeg",
             )
-            st.rerun()
-
         except Exception as exc:
             st.error(str(exc))
 
     if st.session_state.word_audio_bytes:
-        st.success(f"Prepared: {st.session_state.word_audio_name}")
-        st.audio(st.session_state.word_audio_bytes, format="audio/mp3")
         st.download_button(
             label="Download word mp3 again",
             data=st.session_state.word_audio_bytes,
@@ -350,19 +316,17 @@ with audio_col2:
             st.session_state.sentence_audio_bytes = audio_bytes
             st.session_state.sentence_audio_name = file_name
 
-            queue_download(
+            st.success(f"Generated and downloading: {file_name}")
+            st.audio(audio_bytes, format="audio/mp3")
+            auto_download_bytes(
                 file_bytes=audio_bytes,
                 file_name=file_name,
                 mime="audio/mpeg",
             )
-            st.rerun()
-
         except Exception as exc:
             st.error(str(exc))
 
     if st.session_state.sentence_audio_bytes:
-        st.success(f"Prepared: {st.session_state.sentence_audio_name}")
-        st.audio(st.session_state.sentence_audio_bytes, format="audio/mp3")
         st.download_button(
             label="Download sentence mp3 again",
             data=st.session_state.sentence_audio_bytes,
@@ -437,36 +401,23 @@ if st.session_state.image_results:
                     file_name = f"{build_base_filename(tag, lesson, word)}.jpg"
                     image_bytes = build_jpg_bytes_from_url(image_item["original"])
 
-                    queue_download(
+                    st.success(f"Prepared and downloading: {file_name}")
+                    auto_download_bytes(
                         file_bytes=image_bytes,
                         file_name=file_name,
                         mime="image/jpeg",
                     )
-                    st.rerun()
 
+                    st.download_button(
+                        label="Download image again",
+                        data=image_bytes,
+                        file_name=file_name,
+                        mime="image/jpeg",
+                        use_container_width=True,
+                        key=f"download_image_again_{index}",
+                    )
                 except Exception as exc:
                     st.error(str(exc))
-
-            try:
-                tag = st.session_state.tag.strip()
-                lesson, word = ensure_required_fields(
-                    tag,
-                    st.session_state.lesson,
-                    st.session_state.word,
-                )
-                preview_file_name = f"{build_base_filename(tag, lesson, word)}.jpg"
-                image_bytes = build_jpg_bytes_from_url(image_item["original"])
-
-                st.download_button(
-                    label="Download image again",
-                    data=image_bytes,
-                    file_name=preview_file_name,
-                    mime="image/jpeg",
-                    use_container_width=True,
-                    key=f"download_image_again_{index}",
-                )
-            except Exception:
-                pass
 
 st.caption(
     "Word file: {tag}_{lesson}_{word}.mp3 | "
